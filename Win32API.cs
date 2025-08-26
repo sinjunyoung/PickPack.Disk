@@ -12,8 +12,26 @@ namespace PickPack.Disk
     {
         public const uint FILE_BEGIN = 0;
 
+        public const uint GENERIC_READ = 0x80000000;
+        public const uint GENERIC_WRITE = 0x40000000;
+        public const uint FILE_SHARE_READ = 0x00000001;
+        public const uint FILE_SHARE_WRITE = 0x00000002;
+        public const uint OPEN_EXISTING = 3;
+
+        public const uint IOCTL_DISK_DELETE_DRIVE_LAYOUT = 0x0007C100;
+        public const uint IOCTL_DISK_CREATE_DISK = 0x0007C058;
         public const uint IOCTL_DISK_GET_DRIVE_GEOMETRY = 0x00070000;
         public const uint IOCTL_DISK_GET_LENGTH_INFO = 0x7405C;
+        public const uint IOCTL_DISK_UPDATE_DRIVE_SIZE = 0x0007C0C0;
+        public const uint IOCTL_DISK_UPDATE_PROPERTIES = 0x00070140;
+
+        public const uint IOCTL_VOLUME_ONLINE = 0x0056C008;
+
+        public const uint IOCTL_STORAGE_EJECT_MEDIA = 0x2D4808;
+        public const uint IOCTL_STORAGE_LOAD_MEDIA = 0x2D4804;
+
+        public const uint FSCTL_LOCK_VOLUME = 0x00090018;
+        public const uint FSCTL_DISMOUNT_VOLUME = 0x00090020;
 
         public const uint FILE_VOLUME_IS_SYSTEM = 0x00002000;
         public const uint FILE_SYSTEM_IS_HIDDEN = 0x00010000;
@@ -32,6 +50,20 @@ namespace PickPack.Disk
         public struct GET_LENGTH_INFORMATION
         {
             public long Length;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CREATE_DISK_GPT
+        {
+            public Guid DiskId;
+            public uint MaxPartitionCount;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct CREATE_DISK
+        {
+            public int PartitionStyle; // 0=MBR, 1=GPT
+            public CREATE_DISK_GPT Gpt;
         }
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]

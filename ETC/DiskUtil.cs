@@ -41,7 +41,7 @@ namespace PickPack.Disk
 
         public static long GetDiskLength(string physicalDrivePath)
         {
-            using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite);
+            using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite);            
             return stream.Length;
         }
 

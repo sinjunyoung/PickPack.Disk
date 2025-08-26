@@ -4,6 +4,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Security.Principal;
 using System.ServiceProcess;
 using System.Text;
 using System.Threading.Tasks;
@@ -15,34 +16,6 @@ namespace PickPack.Disk
         static readonly string[] SafeFileSystems = { "FAT32", "NTFS", "exFAT" };
 
         #region Private
-
-        private static async Task<bool> RunPowerShellScriptAsync(string script)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -Command \"{script}\"",
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardError = true,
-                RedirectStandardOutput = true
-            };
-
-            try
-            {
-                using var process = Process.Start(psi);
-                if (process != null)
-                {
-                    await process.WaitForExitAsync();
-                    return process.ExitCode == 0;
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine($"PowerShell 스크립트 실행 실패: {ex.Message}");
-            }
-            return false;
-        }
 
         private static int GetPartitionCountByDiskNumber(int diskNumber)
         {
@@ -76,8 +49,6 @@ namespace PickPack.Disk
 
             return driveLetters;
         }
-
-
 
         private static List<string> FindUnassignedVolumeGuids()
         {
@@ -151,6 +122,43 @@ namespace PickPack.Disk
             return null;
         }
 
+        private static void DeleteAndInitPartition(int diskNumber)
+        {
+            string diskPath = $@"\\.\PhysicalDrive{diskNumber}";
+
+            using (var handle = Win32API.CreateFile(diskPath, FileAccess.ReadWrite, FileShare.None, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero))
+            {
+                if (handle.IsInvalid)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "디스크 핸들 열기 실패.");
+
+                bool result = Win32API.DeviceIoControl(handle, Win32API.IOCTL_DISK_DELETE_DRIVE_LAYOUT, IntPtr.Zero, 0, IntPtr.Zero, 0, out uint bytesReturned, IntPtr.Zero);
+
+                if (!result)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "파티션 삭제 실패.");
+
+                Win32API.CREATE_DISK createDisk = new Win32API.CREATE_DISK
+                {
+                    PartitionStyle = 1,
+                    Gpt = new Win32API.CREATE_DISK_GPT
+                    {
+                        DiskId = Guid.NewGuid(),
+                        MaxPartitionCount = 128
+                    }
+                };
+
+                int size = Marshal.SizeOf(createDisk);
+                IntPtr ptr = Marshal.AllocHGlobal(size);
+                Marshal.StructureToPtr(createDisk, ptr, false);
+
+                result = Win32API.DeviceIoControl(handle, Win32API.IOCTL_DISK_CREATE_DISK, ptr, (uint)size, IntPtr.Zero, 0, out bytesReturned, IntPtr.Zero);
+
+                if (!result)
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "GPT 초기화 실패.");
+
+                Marshal.FreeHGlobal(ptr);
+            }
+        }
+
         #endregion
 
         public static async Task DeleteAllPartitionsAsync(int diskNumber)
@@ -164,17 +172,19 @@ namespace PickPack.Disk
                 foreach (var letter in letters)
                     Win32API.DeleteVolumeMountPoint($"{letter}\\");
 
-                for (int i = 1; i <= count; i++)
-                    await RunPowerShellScriptAsync($"Remove-Partition -DiskNumber {diskNumber} -PartitionNumber {i} -Confirm:$false");
+                await Task.Run(() => DeleteAndInitPartition(diskNumber));
             }
-
-            await Task.Delay(100);
         }
 
-        public static async Task RescanDisksAsync()
+        public static void RescanDisk(int diskNumber)
         {
-            await RunPowerShellScriptAsync("Update-HostStorageCache");
-            await Task.Delay(100);
+            string diskPath = $@"\\.\PhysicalDrive{diskNumber}";
+
+            using (var handle = Win32API.CreateFile(diskPath, FileAccess.ReadWrite, FileShare.None, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero))
+            {
+                bool result2 = Win32API.DeviceIoControl(handle, Win32API.IOCTL_DISK_UPDATE_PROPERTIES,
+                    IntPtr.Zero, 0, IntPtr.Zero, 0, out uint bytesReturned2, IntPtr.Zero);
+            }
         }
 
         public static void AssignNextAvailableDriveLetter()

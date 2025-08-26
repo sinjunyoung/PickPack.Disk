@@ -256,6 +256,7 @@ namespace PickPack.Disk
                 {
                     await outStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
                     totalWritten += buffer.Length;
+
                     progressReporter(totalWritten, totalSize, "이미지 저장 중...");
                 }
             }

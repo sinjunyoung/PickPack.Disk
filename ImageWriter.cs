@@ -38,7 +38,6 @@ namespace PickPack.Disk
         #region Event
 
         public event EventHandler<ProgressEventArgs>? ProgressChanged;
-        public event EventHandler<ImageWriterEventArgs>? WriteEnding;
         public event EventHandler<EventArgs>? WriteEnded;
 
         protected virtual void OnProgressChanged(int percent, string message1, string? message2 = "")
@@ -48,14 +47,6 @@ namespace PickPack.Disk
                 Percent = percent,
                 Message1 = message1,
                 Message2 = message2
-            });
-        }
-
-        protected virtual void OnWriteEnding(SafeFileHandle physicalDriveHandle)
-        {
-            WriteEnding?.Invoke(this, new ImageWriterEventArgs
-            {
-                Handle = physicalDriveHandle
             });
         }
 
@@ -132,7 +123,6 @@ namespace PickPack.Disk
                 await Task.WhenAll(producerTask, consumerTask);
 
                 this.progressReporter.ReportCompletion($"{this.WorkTitle} 완료");
-                OnWriteEnding(stream.SafeFileHandle);
             }
         }
 

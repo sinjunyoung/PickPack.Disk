@@ -92,11 +92,15 @@ namespace PickPack.Disk
                         {
                             if (deviceId != null && model != null)
                             {
-                                long sizeBytes = DiskUtil.GetDiskLength(deviceId);
-                                if (sizeBytes > 0)
+                                try
                                 {
-                                    infos.Add(new DriveInfos(deviceId, model, sizeBytes));
+                                    long sizeBytes = DiskUtil.GetDiskLength(deviceId);
+                                    if (sizeBytes > 0)
+                                    {
+                                        infos.Add(new DriveInfos(deviceId, model, sizeBytes));
+                                    }
                                 }
+                                catch { }
                             }
                         }
                     }
