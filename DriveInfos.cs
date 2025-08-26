@@ -52,31 +52,6 @@ namespace PickPack.Disk
 
         #endregion
 
-        #region Private
-
-        private static long GetDiskLengthWithRetry(string devicePath, int maxRetries = 2)
-        {
-            for (int i = 0; i < maxRetries; i++)
-            {
-                try
-                {
-                    long length = DiskUtil.GetDiskLength(devicePath);
-                    if (length > 0)
-                        return length;
-                }
-                catch
-                {
-                }
-
-                if (i < maxRetries - 1)
-                    Thread.Sleep(200);
-            }
-
-            return 0;
-        }
-
-        #endregion
-
         #region Public
 
         public static string? GetDriveLetterFromDiskNumber(int diskNumber)
@@ -117,7 +92,7 @@ namespace PickPack.Disk
                         {
                             if (deviceId != null && model != null)
                             {
-                                long sizeBytes = GetDiskLengthWithRetry(deviceId);
+                                long sizeBytes = DiskUtil.GetDiskLength(deviceId);
                                 if (sizeBytes > 0)
                                 {
                                     infos.Add(new DriveInfos(deviceId, model, sizeBytes));

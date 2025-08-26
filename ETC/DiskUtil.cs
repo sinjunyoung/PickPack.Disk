@@ -36,40 +36,13 @@ namespace PickPack.Disk
 
         public static long GetDiskLength(int physicalDriveNumber)
         {
-            string physicalDrivePath = $@"\\.\PhysicalDrive{physicalDriveNumber}";
-            return GetDiskLength(physicalDrivePath);
+            return GetDiskLength($@"\\.\PhysicalDrive{physicalDriveNumber}");
         }
 
-        public static long GetDiskLength(string devicePath)
+        public static long GetDiskLength(string physicalDrivePath)
         {
-            using (SafeFileHandle diskHandle = Win32API.CreateFile(devicePath, FileAccess.Read, FileShare.Read,
-                           IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero))
-            {
-
-                if (diskHandle.IsInvalid)
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-
-                return GetDiskLength(diskHandle);
-            }
-        }
-
-        public static long GetDiskLength(SafeFileHandle diskHandle)
-        {
-            int size = Marshal.SizeOf<Win32API.GET_LENGTH_INFORMATION>();
-            IntPtr buffer = Marshal.AllocHGlobal(size);
-            try
-            {
-                if (!Win32API.DeviceIoControl(diskHandle, Win32API.IOCTL_DISK_GET_LENGTH_INFO,
-                                    IntPtr.Zero, 0, buffer, (uint)size, out _, IntPtr.Zero))
-                    throw new Win32Exception(Marshal.GetLastWin32Error());
-
-                Win32API.GET_LENGTH_INFORMATION lengthInfo = Marshal.PtrToStructure<Win32API.GET_LENGTH_INFORMATION>(buffer);
-                return lengthInfo.Length;
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(buffer);
-            }
+            using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite);
+            return stream.Length;
         }
 
         public static ulong GetAvailableFreeSpace(string path)

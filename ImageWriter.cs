@@ -85,8 +85,6 @@ namespace PickPack.Disk
             if (!ImageWriterFactory.IsSupported(extension))
                 throw new NotSupportedException($"지원되지 않는 파일 형식입니다. 지원 형식: {string.Join(", ", ImageWriterFactory.GetSupportedExtensions())}");
 
-            await PartitionUtil.RescanDisksAsync();
-
             cancellationToken.ThrowIfCancellationRequested();
 
             var handler = ImageWriterFactory.GetHandler(extension, OnProgressChanged);
@@ -112,17 +110,12 @@ namespace PickPack.Disk
             {
                 string physicalDrivePath = $@"\\.\PhysicalDrive{physicalDriveNumber}";
 
-                using var physicalDriveHandle = Win32API.CreateFile(physicalDrivePath, FileAccess.ReadWrite, FileShare.None, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero);
+                using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 4096, useAsync: true);
 
-                if (physicalDriveHandle.IsInvalid)
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "물리 디스크 핸들 열기 실패");
+                stream.Seek(0, SeekOrigin.Begin);
 
-                if (!Win32API.SetFilePointerEx(physicalDriveHandle, 0, out _, Win32API.FILE_BEGIN))
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "디스크 오프셋 초기화 실패");
-
-                int sectorSize = DiskUtil.GetSectorSize(physicalDriveHandle);
-                long diskLength = DiskUtil.GetDiskLength(physicalDriveHandle);
-                long bytesToWrite = Math.Min(sourceLength, diskLength);
+                int sectorSize = DiskUtil.GetSectorSize(stream.SafeFileHandle);                
+                long bytesToWrite = Math.Min(sourceLength, stream.Length);
                 int sectorsPerBuffer = Math.Max(131072, sectorSize * 128);
                 int bufferSize = sectorSize * sectorsPerBuffer;
 
@@ -134,14 +127,12 @@ namespace PickPack.Disk
                 });
 
                 var producerTask = ProduceDataAsync(sourceStream, channel.Writer, bufferSize, sectorSize, cancellationToken);
-                var consumerTask = ConsumeDataAsync(channel.Reader, physicalDriveHandle, bufferSize, bytesToWrite, cancellationToken);
+                var consumerTask = ConsumeDataAsync(channel.Reader, stream, bytesToWrite, cancellationToken);
 
                 await Task.WhenAll(producerTask, consumerTask);
 
                 this.progressReporter.ReportCompletion($"{this.WorkTitle} 완료");
-                OnWriteEnding(physicalDriveHandle);
-
-                Win32API.FlushFileBuffers(physicalDriveHandle);
+                OnWriteEnding(stream.SafeFileHandle);
             }
         }
 
@@ -152,26 +143,21 @@ namespace PickPack.Disk
             try
             {
                 int read;
-
                 while ((read = await fs.ReadAsync(buffer, 0, bufferSize, cancellationToken)) > 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
                     byte[] dataToSend;
-
                     if (read < bufferSize)
                     {
                         int padding = (sectorSize - (read % sectorSize)) % sectorSize;
                         int totalSize = read + padding;
                         dataToSend = new byte[totalSize];
-
                         Buffer.BlockCopy(buffer, 0, dataToSend, 0, read);
-                        // padding 부분은 이미 0으로 초기화됨 (new byte[]의 기본값)
                     }
                     else
                     {
                         dataToSend = new byte[read];
-
                         Buffer.BlockCopy(buffer, 0, dataToSend, 0, read);
                     }
 
@@ -181,41 +167,31 @@ namespace PickPack.Disk
             finally
             {
                 Optimal.ArrayPool.Return(buffer);
-
                 writer.Complete();
             }
         }
 
-        private async Task ConsumeDataAsync(ChannelReader<byte[]> reader, SafeFileHandle physicalDriveHandle, int bufferSize, long bytesToWrite, CancellationToken cancellationToken)
+        private async Task ConsumeDataAsync(ChannelReader<byte[]> reader, FileStream physicalDriveStream, long bytesToWrite, CancellationToken cancellationToken)
         {
-            IntPtr alignedBuffer = Marshal.AllocHGlobal(bufferSize);
-
             long totalWritten = 0;
 
-            try
+            await foreach (var buffer in reader.ReadAllAsync(cancellationToken))
             {
-                await foreach (var buffer in reader.ReadAllAsync(cancellationToken))
+                cancellationToken.ThrowIfCancellationRequested();
+
+                try
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
-
-                    Marshal.Copy(buffer, 0, alignedBuffer, buffer.Length);
-
-                    if (!Win32API.WriteFile(physicalDriveHandle, alignedBuffer, (uint)buffer.Length, out uint written, IntPtr.Zero))
-                    {
-                        int err = Marshal.GetLastWin32Error();
-
-                        throw new Win32Exception(err == 0 ? -1 : err, $"{WorkTitle} 실패 (오류코드: {err})");
-                    }
-
-                    totalWritten += written;
-
+                    await physicalDriveStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
+                    totalWritten += buffer.Length;
                     this.progressReporter.ReportProgressWithInterval(totalWritten, bytesToWrite, $"{WorkTitle} 진행중...", 1.0);
                 }
+                catch (IOException)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    throw new Win32Exception(errorCode == 0 ? -1 : errorCode, $"{WorkTitle} 실패 (오류코드: {errorCode})");
+                }
             }
-            finally
-            {
-                Marshal.FreeHGlobal(alignedBuffer);
-            }
+            physicalDriveStream.Flush();
         }
     }
 }

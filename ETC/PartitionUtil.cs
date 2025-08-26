@@ -168,13 +168,13 @@ namespace PickPack.Disk
                     await RunPowerShellScriptAsync($"Remove-Partition -DiskNumber {diskNumber} -PartitionNumber {i} -Confirm:$false");
             }
 
-            await Task.Delay(500);
+            await Task.Delay(100);
         }
 
         public static async Task RescanDisksAsync()
         {
             await RunPowerShellScriptAsync("Update-HostStorageCache");
-            await Task.Delay(500);
+            await Task.Delay(100);
         }
 
         public static void AssignNextAvailableDriveLetter()
