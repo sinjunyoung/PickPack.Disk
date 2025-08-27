@@ -51,7 +51,7 @@ namespace PickPack.Disk
 
             try
             {
-                int bufferSizeMB = Optimal.BufferSize / (1024 * 1024);
+                int bufferSizeMB = Optimal.BufferSize / (512 * 1024);
                 int optimalCapacity = Math.Max(4, Math.Min(16, 64 / bufferSizeMB));
                 return optimalCapacity;
             }

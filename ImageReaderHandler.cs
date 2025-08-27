@@ -55,17 +55,20 @@ namespace PickPack.Disk
 
             zipFile.SaveProgress += (sender, e) => OnZipSaveProgress(e);
             zipFile.AddEntry(imgFileName, optimizedStream);
-
+            
             await Task.Run(() => zipFile.Save(outputPath), cancellationToken);
         }
 
         private void OnZipSaveProgress(SaveProgressEventArgs e)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (e.EventType == ZipProgressEventType.Saving_EntryBytesRead && e.TotalBytesToTransfer > 0)
+        {            
+            if (this.cancellationToken.IsCancellationRequested)
+                e.Cancel = true;
+            else
             {
-                progressReporter(e.BytesTransferred, e.TotalBytesToTransfer, "이미지 저장 중...");
+                if (e.EventType == ZipProgressEventType.Saving_EntryBytesRead && e.TotalBytesToTransfer > 0)
+                {
+                    progressReporter(e.BytesTransferred, e.TotalBytesToTransfer, "이미지 저장 중...");
+                }
             }
         }
 
@@ -184,7 +187,8 @@ namespace PickPack.Disk
             var producerTask = ProduceDataAsync(sourceStream, channel.Writer, totalSize, cancellationToken);
             var consumerTask = ConsumeDataAsync(channel.Reader, outputPath, totalSize, cancellationToken);
 
-            await Task.WhenAll(producerTask, consumerTask);
+            await consumerTask;
+            await producerTask;
         }
 
         private async Task ProduceDataAsync(Stream sourceStream, ChannelWriter<byte[]> writer, long totalSize, CancellationToken cancellationToken)

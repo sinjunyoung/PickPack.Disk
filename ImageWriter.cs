@@ -120,7 +120,8 @@ namespace PickPack.Disk
                 var producerTask = ProduceDataAsync(sourceStream, channel.Writer, bufferSize, sectorSize, cancellationToken);
                 var consumerTask = ConsumeDataAsync(channel.Reader, stream, bytesToWrite, cancellationToken);
 
-                await Task.WhenAll(producerTask, consumerTask);
+                await consumerTask;
+                await producerTask;
 
                 this.progressReporter.ReportCompletion($"{this.WorkTitle} 완료");
             }
@@ -171,11 +172,6 @@ namespace PickPack.Disk
                     await physicalDriveStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
                     totalWritten += buffer.Length;
                     this.progressReporter.ReportProgressWithInterval(totalWritten, bytesToWrite, $"{WorkTitle} 진행중...", 1.0);
-                }
-                catch (IOException)
-                {
-                    int errorCode = Marshal.GetLastWin32Error();
-                    throw new Win32Exception(errorCode == 0 ? -1 : errorCode, $"{WorkTitle} 실패 (오류코드: {errorCode})");
                 }
                 finally
                 {

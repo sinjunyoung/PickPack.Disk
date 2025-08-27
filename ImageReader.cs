@@ -79,6 +79,8 @@ namespace PickPack.Disk
 
                 await handler.WriteImageAsync(driveStream, outputPath, driveSize, cancellationToken);
 
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 this.progressReporter.ReportCompletion("이미지 저장 완료");
 
                 OnWriteEnded();

@@ -192,7 +192,10 @@ namespace PickPack.Disk
             base.Dispose(disposing);
         }
 
-        public override int Read(byte[] buffer, int offset, int count) => this.baseStream.Read(buffer, offset, count);
+        public override int Read(byte[] buffer, int offset, int count)
+        {            
+            return this.baseStream.Read(buffer, offset, count);
+        }
 
         public override void Flush()
         {
