@@ -36,6 +36,9 @@ namespace PickPack.Disk
         public const uint FILE_VOLUME_IS_SYSTEM = 0x00002000;
         public const uint FILE_SYSTEM_IS_HIDDEN = 0x00010000;
 
+        public const uint ES_CONTINUOUS = 0x80000000;
+        public const uint ES_SYSTEM_REQUIRED = 0x00000001;
+
         [StructLayout(LayoutKind.Sequential)]
         public struct DISK_GEOMETRY
         {
@@ -109,5 +112,8 @@ namespace PickPack.Disk
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool GetDiskFreeSpaceEx(string lpDirectoryName, out ulong lpFreeBytesAvailable, out ulong lpTotalNumberOfBytes, out ulong lpTotalNumberOfFreeBytes);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        public static extern uint SetThreadExecutionState(uint esFlags);
     }
 }

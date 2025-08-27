@@ -63,5 +63,10 @@ namespace PickPack.Disk
 
             return freeBytesAvailable;
         }
+
+        public static void PreventSleep()
+        {
+            Win32API.SetThreadExecutionState(Win32API.ES_CONTINUOUS | Win32API.ES_SYSTEM_REQUIRED);
+        }
     }
 }

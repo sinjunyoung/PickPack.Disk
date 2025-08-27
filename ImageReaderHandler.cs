@@ -44,8 +44,8 @@ namespace PickPack.Disk
             zipFile.CompressionLevel = compressionLevel;
             zipFile.MaxOutputSegmentSize64 = maxOutputSegmentSize;
             zipFile.BufferSize = Optimal.BufferSize;
-            zipFile.CodecBufferSize = Optimal.BufferSize;
-            zipFile.ParallelDeflateThreshold = long.MaxValue;
+            zipFile.CodecBufferSize = Optimal.BufferSize;            
+            zipFile.ParallelDeflateThreshold = 50 * 1024 * 1024;    // 50MB
             zipFile.AlternateEncoding = null;
             zipFile.AlternateEncodingUsage = ZipOption.Never;
             zipFile.Strategy = CompressionStrategy.Default;
@@ -176,7 +176,7 @@ namespace PickPack.Disk
 
         public async Task WriteImageAsync(Stream sourceStream, string outputPath, long totalSize, CancellationToken cancellationToken)
         {
-            var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1) 
+            var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(Optimal.ChannelCapacity) 
             {
                 FullMode = BoundedChannelFullMode.Wait
             });

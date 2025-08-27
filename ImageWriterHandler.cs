@@ -19,15 +19,22 @@ namespace PickPack.Disk
         {
             await Task.Yield();
             var zipFile = Ionic.Zip.ZipFile.Read(imagePath);
-            var entry = zipFile.Entries.FirstOrDefault(e => e.FileName.EndsWith(".img", StringComparison.OrdinalIgnoreCase));
 
-            if (entry == null)
+            try
+            {
+                var entry = zipFile.Entries.FirstOrDefault(e => e.FileName.EndsWith(".img", StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                    throw new InvalidOperationException("ZIP 파일 안에 IMG 파일이 없습니다.");
+
+                var entryStream = entry.OpenReader();
+                var wrapperStream = new CompositeDisposableStream(entryStream, zipFile);
+                return (wrapperStream, entry.UncompressedSize);
+            }
+            catch
             {
                 zipFile.Dispose();
-                throw new InvalidOperationException("ZIP 파일 안에 IMG 파일이 없습니다.");
+                throw;
             }
-
-            return (entry.OpenReader(), entry.UncompressedSize);
         }
     }
 
@@ -37,15 +44,22 @@ namespace PickPack.Disk
         {
             await Task.Yield();
             var archive = ArchiveFactory.Open(imagePath);
-            var entry = archive.Entries.FirstOrDefault(e => !e.IsDirectory && e.Key.EndsWith(".img", StringComparison.OrdinalIgnoreCase));
 
-            if (entry == null)
+            try
+            {
+                var entry = archive.Entries.FirstOrDefault(e => !e.IsDirectory && e.Key.EndsWith(".img", StringComparison.OrdinalIgnoreCase));
+                if (entry == null)
+                    throw new InvalidOperationException("7z 파일 안에 IMG 파일이 없습니다.");
+
+                var entryStream = entry.OpenEntryStream();
+                var wrapperStream = new CompositeDisposableStream(entryStream, archive);
+                return (wrapperStream, entry.Size);
+            }
+            catch
             {
                 archive.Dispose();
-                throw new InvalidOperationException("7z 파일 안에 IMG 파일이 없습니다.");
+                throw;
             }
-
-            return (entry.OpenEntryStream(), entry.Size);
         }
     }
 
@@ -144,6 +158,60 @@ namespace PickPack.Disk
         public static string[] GetSupportedExtensions()
         {
             return HandlerCreators.Keys.ToArray();
+        }
+    }
+
+    public class CompositeDisposableStream : Stream
+    {
+        readonly Stream baseStream;
+        readonly IDisposable additionalDisposable;
+
+        public override bool CanRead  => this.baseStream.CanRead;
+
+        public override bool CanSeek => this.baseStream.CanSeek;
+
+        public override bool CanWrite => this.baseStream.CanWrite;
+
+        public override long Length => this.baseStream.Length;
+
+        public override long Position { get => this.baseStream.Position; set => this.baseStream.Position = value; }
+
+        public CompositeDisposableStream(Stream baseStream, IDisposable additionalDisposable)
+        {
+            this.baseStream = baseStream;
+            this.additionalDisposable = additionalDisposable;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                this.baseStream?.Dispose();
+                this.additionalDisposable?.Dispose();
+            }
+            base.Dispose(disposing);
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => this.baseStream.Read(buffer, offset, count);
+
+        public override void Flush()
+        {
+            this.baseStream?.Flush();
+        }
+
+        public override long Seek(long offset, SeekOrigin origin)
+        {
+            return (long)this.baseStream.Seek(offset, origin);
+        }
+
+        public override void SetLength(long value)
+        {
+            this.baseStream?.SetLength(value);
+        }
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            this.baseStream?.Write(buffer, offset, count);
         }
     }
 }
