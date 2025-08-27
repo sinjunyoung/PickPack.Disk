@@ -181,10 +181,7 @@ namespace PickPack.Disk
             string diskPath = $@"\\.\PhysicalDrive{diskNumber}";
 
             using (var handle = Win32API.CreateFile(diskPath, FileAccess.ReadWrite, FileShare.None, IntPtr.Zero, FileMode.Open, 0, IntPtr.Zero))
-            {
-                bool result2 = Win32API.DeviceIoControl(handle, Win32API.IOCTL_DISK_UPDATE_PROPERTIES,
-                    IntPtr.Zero, 0, IntPtr.Zero, 0, out uint bytesReturned2, IntPtr.Zero);
-            }
+                Win32API.DeviceIoControl(handle, Win32API.IOCTL_DISK_UPDATE_PROPERTIES, IntPtr.Zero, 0, IntPtr.Zero, 0, out uint bytesReturned2, IntPtr.Zero);
         }
 
         public static void AssignNextAvailableDriveLetter()

@@ -19,18 +19,18 @@ namespace PickPack.Disk
 
         readonly long maxOutputSegmentSize;
         readonly CompressionLevel compressionLevel;
-        readonly Action<int, string, string?> progressCallback;
+        readonly Action<long, long, string> progressReporter;
         readonly CancellationToken cancellationToken;
 
         #endregion
 
         #region Constructor
 
-        public ZipReadHandler(long maxOutputSegmentSize, CompressionLevel compressionLevel, Action<int, string, string?> progressCallback, CancellationToken cancellationToken)
+        public ZipReadHandler(long maxOutputSegmentSize, CompressionLevel compressionLevel, Action<long, long, string> progressReporter, CancellationToken cancellationToken)
         {
             this.maxOutputSegmentSize = maxOutputSegmentSize;
             this.compressionLevel = compressionLevel;
-            this.progressCallback = progressCallback;
+            this.progressReporter = progressReporter;
             this.cancellationToken = cancellationToken;
         }
 
@@ -65,8 +65,7 @@ namespace PickPack.Disk
 
             if (e.EventType == ZipProgressEventType.Saving_EntryBytesRead && e.TotalBytesToTransfer > 0)
             {
-                int percent = (int)((double)e.BytesTransferred / e.TotalBytesToTransfer * 100);
-                progressCallback(percent, "이미지 저장 중...", null);
+                progressReporter(e.BytesTransferred, e.TotalBytesToTransfer, "이미지 저장 중...");
             }
         }
 
@@ -177,7 +176,7 @@ namespace PickPack.Disk
 
         public async Task WriteImageAsync(Stream sourceStream, string outputPath, long totalSize, CancellationToken cancellationToken)
         {
-            var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(Optimal.ChannelCapacity)
+            var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(1) 
             {
                 FullMode = BoundedChannelFullMode.Wait
             });
@@ -211,10 +210,18 @@ namespace PickPack.Disk
                         read = Optimal.BufferSize;
                     }
 
-                    byte[] dataToSend = new byte[read];
-                    Array.Copy(rentedBuffer, dataToSend, read);
+                    if (read == Optimal.BufferSize)
+                    {
+                        await writer.WriteAsync(rentedBuffer, cancellationToken);
+                        rentedBuffer = Optimal.ArrayPool.Rent(Optimal.BufferSize);
+                    }
+                    else
+                    {
+                        byte[] dataToSend = Optimal.ArrayPool.Rent(read);
+                        Array.Copy(rentedBuffer, dataToSend, read);
+                        await writer.WriteAsync(dataToSend, cancellationToken);
+                    }
 
-                    await writer.WriteAsync(dataToSend, cancellationToken);
                     totalRead += read;
                 }
 
@@ -238,26 +245,33 @@ namespace PickPack.Disk
 
             await foreach (var buffer in reader.ReadAllAsync(cancellationToken))
             {
-                if (buffer.Length == 0)
+                try
                 {
-                    // 남은 바이트를 0으로 채우기
-                    long bytesRemaining = totalSize - totalWritten;
-                    while (bytesRemaining > 0)
+                    if (buffer.Length == 0)
                     {
-                        int writeCount = (int)Math.Min(Optimal.BufferSize, bytesRemaining);
-                        await outStream.WriteAsync(Optimal.ZeroBuffer, 0, writeCount, cancellationToken);
-                        bytesRemaining -= writeCount;
-                        zeroBytesWritten += writeCount;
+                        long bytesRemaining = totalSize - totalWritten;
+                        while (bytesRemaining > 0)
+                        {
+                            int writeCount = (int)Math.Min(Optimal.BufferSize, bytesRemaining);
+                            await outStream.WriteAsync(Optimal.ZeroBuffer, 0, writeCount, cancellationToken);
+                            bytesRemaining -= writeCount;
+                            zeroBytesWritten += writeCount;
 
-                        progressReporter(totalWritten + zeroBytesWritten, totalSize, "이미지 저장 중...");
+                            progressReporter(totalWritten + zeroBytesWritten, totalSize, "이미지 저장 중...");
+                        }
+                    }
+                    else
+                    {
+                        await outStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
+                        totalWritten += buffer.Length;
+
+                        progressReporter(totalWritten, totalSize, "이미지 저장 중...");
                     }
                 }
-                else
+                finally
                 {
-                    await outStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
-                    totalWritten += buffer.Length;
-
-                    progressReporter(totalWritten, totalSize, "이미지 저장 중...");
+                    if (buffer != Array.Empty<byte>())
+                        Optimal.ArrayPool.Return(buffer);
                 }
             }
         }
@@ -266,11 +280,11 @@ namespace PickPack.Disk
     public static class ImageReaderFactory
     {
         public static IImageReaderHandler? GetHandler(string extension, long maxSegmentSize, CompressionLevel compressionLevel,
-            Action<int, string, string?> progressCallback, Action<long, long, string> rawProgressReporter, CancellationToken cancellationToken)
+            Action<long, long, string> rawProgressReporter, CancellationToken cancellationToken)
         {
             return extension.ToLowerInvariant() switch
             {
-                ".zip" => new ZipReadHandler(maxSegmentSize, compressionLevel, progressCallback, cancellationToken),
+                ".zip" => new ZipReadHandler(maxSegmentSize, compressionLevel, rawProgressReporter, cancellationToken),
                 ".img" => new RawImageReadHandler(rawProgressReporter, cancellationToken),
                 _ => null
             };

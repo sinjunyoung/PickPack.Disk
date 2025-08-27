@@ -137,21 +137,19 @@ namespace PickPack.Disk
                 {
                     cancellationToken.ThrowIfCancellationRequested();
 
-                    byte[] dataToSend;
-                    if (read < bufferSize)
+                    if (read == bufferSize)
                     {
-                        int padding = (sectorSize - (read % sectorSize)) % sectorSize;
-                        int totalSize = read + padding;
-                        dataToSend = new byte[totalSize];
-                        Buffer.BlockCopy(buffer, 0, dataToSend, 0, read);
+                        await writer.WriteAsync(buffer, cancellationToken);
+                        buffer = Optimal.ArrayPool.Rent(bufferSize);
                     }
                     else
                     {
-                        dataToSend = new byte[read];
+                        int padding = (sectorSize - (read % sectorSize)) % sectorSize;
+                        int totalSize = read + padding;
+                        byte[] dataToSend = Optimal.ArrayPool.Rent(totalSize);
                         Buffer.BlockCopy(buffer, 0, dataToSend, 0, read);
+                        await writer.WriteAsync(dataToSend, cancellationToken);
                     }
-
-                    await writer.WriteAsync(dataToSend, cancellationToken);
                 }
             }
             finally
@@ -168,7 +166,6 @@ namespace PickPack.Disk
             await foreach (var buffer in reader.ReadAllAsync(cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
-
                 try
                 {
                     await physicalDriveStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
@@ -179,6 +176,10 @@ namespace PickPack.Disk
                 {
                     int errorCode = Marshal.GetLastWin32Error();
                     throw new Win32Exception(errorCode == 0 ? -1 : errorCode, $"{WorkTitle} 실패 (오류코드: {errorCode})");
+                }
+                finally
+                {
+                    Optimal.ArrayPool.Return(buffer);
                 }
             }
             physicalDriveStream.Flush();

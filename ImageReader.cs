@@ -72,7 +72,7 @@ namespace PickPack.Disk
                 using var driveStream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.Read, FileShare.None,
                     Optimal.BufferSize, FileOptions.Asynchronous);
 
-                var handler = ImageReaderFactory.GetHandler(extension, maxOutputSegmentSize64, compressionLevel, OnProgressChanged, this.progressReporter.ReportProgress, cancellationToken);
+                var handler = ImageReaderFactory.GetHandler(extension, maxOutputSegmentSize64, compressionLevel, this.progressReporter.ReportProgress, cancellationToken);
 
                 if (handler == null)
                     throw new InvalidOperationException($"지원하지 않는 파일 형식입니다: {extension}");
