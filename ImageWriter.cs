@@ -69,18 +69,21 @@ namespace PickPack.Disk
             OnWriteEnded();
         }
 
-        private async Task WriteImageAsyncInternal(string imagePath, int physicalDriveNumber, long diskSize, CancellationToken cancellationToken)
+        private async Task WriteImageAsyncInternal(string imagePathOrUrl, int physicalDriveNumber, long diskSize, CancellationToken cancellationToken)
         {
-            string extension = Path.GetExtension(imagePath).ToLowerInvariant();
-
-            if (!ImageWriterFactory.IsSupported(extension))
-                throw new NotSupportedException($"지원되지 않는 파일 형식입니다. 지원 형식: {string.Join(", ", ImageWriterFactory.GetSupportedExtensions())}");
+            if (!ImageWriterFactory.IsSupported(imagePathOrUrl))
+            {
+                string supportedTypes = string.Join(", ", ImageWriterFactory.GetSupportedExtensions());
+                throw new NotSupportedException($"지원되지 않는 파일 형식입니다. 지원 형식: {supportedTypes}");
+            }
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var handler = ImageWriterFactory.GetHandler(extension, OnProgressChanged);
+            var handler = ImageWriterFactory.GetHandler(imagePathOrUrl, OnProgressChanged);
+            if (handler == null)
+                throw new InvalidOperationException("적절한 핸들러를 찾을 수 없습니다.");
 
-            var (sourceStream, sourceLength) = await handler.OpenStreamAsync(imagePath, cancellationToken);
+            var (sourceStream, sourceLength) = await handler.OpenStreamAsync(imagePathOrUrl, cancellationToken);
 
             if (sourceLength > diskSize)
             {
@@ -120,8 +123,8 @@ namespace PickPack.Disk
                 var producerTask = ProduceDataAsync(sourceStream, channel.Writer, bufferSize, sectorSize, cancellationToken);
                 var consumerTask = ConsumeDataAsync(channel.Reader, stream, bytesToWrite, cancellationToken);
 
-                await consumerTask;
                 await producerTask;
+                await consumerTask;
 
                 this.progressReporter.ReportCompletion($"{this.WorkTitle} 완료");
             }
@@ -172,6 +175,11 @@ namespace PickPack.Disk
                     await physicalDriveStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
                     totalWritten += buffer.Length;
                     this.progressReporter.ReportProgressWithInterval(totalWritten, bytesToWrite, $"{WorkTitle} 진행중...", 1.0);
+                }
+                catch (IOException)
+                {
+                    int errorCode = Marshal.GetLastWin32Error();
+                    throw new Win32Exception(errorCode == 0 ? -1 : errorCode, $"{WorkTitle} 실패 (오류코드: {errorCode})");
                 }
                 finally
                 {

@@ -145,23 +145,43 @@ namespace PickPack.Disk
                 { ".img", _ => new ImgWriteHandler() }
             };
 
-        public static IImageWriteHandler? GetHandler(string extension, Action<int, string, string?> progressCallback)
+        public static IImageWriteHandler? GetHandler(string pathOrUrl, Action<int, string, string?> progressCallback)
         {
+            // URL인지 확인
+            if (IsUrl(pathOrUrl))
+            {
+                return new UrlWriteHandler(progressCallback);
+            }
+
+            // 파일 확장자로 핸들러 선택
+            string extension = Path.GetExtension(pathOrUrl);
             return HandlerCreators.TryGetValue(extension, out var creator) ? creator(progressCallback) : null;
         }
 
-        public static bool IsSupported(string extension)
+        public static bool IsSupported(string pathOrUrl)
         {
+            if (IsUrl(pathOrUrl))
+                return true;
+
+            string extension = Path.GetExtension(pathOrUrl);
             return HandlerCreators.ContainsKey(extension);
         }
 
         public static string[] GetSupportedExtensions()
         {
-            return HandlerCreators.Keys.ToArray();
+            var extensions = HandlerCreators.Keys.ToList();
+            extensions.Add("URL (http/https)");
+            return extensions.ToArray();
+        }
+
+        private static bool IsUrl(string input)
+        {
+            return Uri.TryCreate(input, UriKind.Absolute, out var uri) &&
+                   (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
         }
     }
 
-    public class CompositeDisposableStream : Stream
+internal class CompositeDisposableStream : Stream
     {
         readonly Stream baseStream;
         readonly IDisposable additionalDisposable;

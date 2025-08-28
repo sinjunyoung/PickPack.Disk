@@ -23,42 +23,12 @@ namespace PickPack.Disk
 
         private static int GetOptimalBufferSize()
         {
-            ////의미가 없어 512KB로 고정
-            //return 512 * 1024;
-
-            try
-            {
-                var availableMemory = GC.GetTotalMemory(false);
-                if (availableMemory > 16L * 1024 * 1024 * 1024)
-                    return 4 * 1024 * 1024;  // 8MB → 4MB
-                else if (availableMemory > 8L * 1024 * 1024 * 1024)
-                    return 2 * 1024 * 1024;  // 4MB → 2MB
-                else if (availableMemory > 4L * 1024 * 1024 * 1024)
-                    return 1024 * 1024;      // 2MB → 1MB
-                else
-                    return 512 * 1024;       // 1MB → 512KB
-            }
-            catch
-            {
-                return 512 * 1024;          // 1MB → 512KB
-            }
+            return 2 * 1024 * 1024;
         }
 
         private static int GetOptimalChannelCapacity()
         {
-            ////의미가 없어 1로 줄임
-            //return 1;
-
-            try
-            {
-                int bufferSizeMB = Optimal.BufferSize / (512 * 1024);
-                int optimalCapacity = Math.Max(4, Math.Min(16, 64 / bufferSizeMB));
-                return optimalCapacity;
-            }
-            catch
-            {
-                return 8;
-            }
+            return 2;
         }
     }
 }
