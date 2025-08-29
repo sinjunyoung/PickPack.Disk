@@ -104,42 +104,79 @@ namespace PickPack.Disk
             {
                 string physicalDrivePath = $@"\\.\PhysicalDrive{physicalDriveNumber}";
 
-                using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None, bufferSize: 4096, useAsync: true);
+                using var stream = new FileStream(physicalDrivePath, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite, 1024 * 1024, FileOptions.WriteThrough);
 
                 stream.Seek(0, SeekOrigin.Begin);
 
-                int sectorSize = DiskUtil.GetSectorSize(stream.SafeFileHandle);                
+                int sectorSize = DiskUtil.GetSectorSize(stream.SafeFileHandle);
                 long bytesToWrite = Math.Min(sourceLength, stream.Length);
-                int sectorsPerBuffer = Math.Max(131072, sectorSize * 128);
-                int bufferSize = sectorSize * sectorsPerBuffer;
 
-                var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(Optimal.ChannelCapacity)
-                {
-                    FullMode = BoundedChannelFullMode.Wait,
-                    SingleReader = true,
-                    SingleWriter = true
-                });
-
-                var producerTask = ProduceDataAsync(sourceStream, channel.Writer, bufferSize, sectorSize, cancellationToken);
-                var consumerTask = ConsumeDataAsync(channel.Reader, stream, bytesToWrite, cancellationToken);
-
-                await producerTask;
-                await consumerTask;
+                // GPT/MBR 헤더를 마지막에 쓰기 위해 지연된 헤더 쓰기 방식 사용
+                await WriteImageWithDelayedHeaders(sourceStream, stream, bytesToWrite, sectorSize, cancellationToken);
 
                 this.progressReporter.ReportCompletion($"{this.WorkTitle} 완료");
             }
         }
 
-        private async Task ProduceDataAsync(Stream fs, ChannelWriter<byte[]> writer, int bufferSize, int sectorSize, CancellationToken cancellationToken)
+        private async Task WriteImageWithDelayedHeaders(Stream sourceStream, FileStream targetStream, long bytesToWrite, int sectorSize, CancellationToken cancellationToken)
+        {
+            const int headerSize = 1048576;
+            byte[] headerBuffer = new byte[headerSize];
+
+            OnProgressChanged(0, "헤더 정보 읽는 중...");
+
+            int headerBytesRead = await sourceStream.ReadAsync(headerBuffer, 0, headerSize, cancellationToken);
+
+            OnProgressChanged(5, "이미지 데이터 쓰는 중...");
+
+            if (bytesToWrite > headerSize)
+            {
+                targetStream.Seek(headerSize, SeekOrigin.Begin);
+                long remainingBytes = bytesToWrite - headerSize;
+
+                await WriteDataWithProgress(sourceStream, targetStream, remainingBytes, headerSize, bytesToWrite, sectorSize, cancellationToken);
+            }
+
+            OnProgressChanged(95, "헤더 정보 쓰는 중...");
+
+            targetStream.Seek(0, SeekOrigin.Begin);
+            await targetStream.WriteAsync(headerBuffer, 0, headerBytesRead, cancellationToken);
+            targetStream.Flush();
+
+            OnProgressChanged(100, "쓰기 완료");
+        }
+
+        private async Task WriteDataWithProgress(Stream sourceStream, FileStream targetStream, long remainingBytes, long headerSize, long totalBytes, int sectorSize, CancellationToken cancellationToken)
+        {
+            int sectorsPerBuffer = Math.Max(131072, sectorSize * 128);
+            int bufferSize = sectorSize * sectorsPerBuffer;
+
+            var channel = Channel.CreateBounded<byte[]>(new BoundedChannelOptions(Optimal.ChannelCapacity)
+            {
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = true
+            });
+
+            var producerTask = ProduceDataAsync(sourceStream, channel.Writer, bufferSize, sectorSize, remainingBytes, cancellationToken);
+            var consumerTask = ConsumeDataAsync(channel.Reader, targetStream, remainingBytes, headerSize, totalBytes, cancellationToken);
+
+            await producerTask;
+            await consumerTask;
+        }
+
+        private async Task ProduceDataAsync(Stream fs, ChannelWriter<byte[]> writer, int bufferSize, int sectorSize, long remainingBytes, CancellationToken cancellationToken)
         {
             byte[] buffer = Optimal.ArrayPool.Rent(bufferSize);
+            long totalRead = 0;
 
             try
             {
                 int read;
-                while ((read = await fs.ReadAsync(buffer, 0, bufferSize, cancellationToken)) > 0)
+                while (totalRead < remainingBytes && (read = await fs.ReadAsync(buffer, 0, (int)Math.Min(bufferSize, remainingBytes - totalRead), cancellationToken)) > 0)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    totalRead += read;
 
                     if (read == bufferSize)
                     {
@@ -163,7 +200,7 @@ namespace PickPack.Disk
             }
         }
 
-        private async Task ConsumeDataAsync(ChannelReader<byte[]> reader, FileStream physicalDriveStream, long bytesToWrite, CancellationToken cancellationToken)
+        private async Task ConsumeDataAsync(ChannelReader<byte[]> reader, FileStream physicalDriveStream, long remainingBytes, long headerSize, long totalBytes, CancellationToken cancellationToken)
         {
             long totalWritten = 0;
 
@@ -172,9 +209,13 @@ namespace PickPack.Disk
                 cancellationToken.ThrowIfCancellationRequested();
                 try
                 {
-                    await physicalDriveStream.WriteAsync(buffer, 0, buffer.Length, cancellationToken);
-                    totalWritten += buffer.Length;
-                    this.progressReporter.ReportProgressWithInterval(totalWritten, bytesToWrite, $"{WorkTitle} 진행중...", 1.0);
+                    long bytesToWriteFromBuffer = Math.Min(buffer.Length, remainingBytes - totalWritten);
+                    await physicalDriveStream.WriteAsync(buffer, 0, (int)bytesToWriteFromBuffer, cancellationToken);
+                    totalWritten += bytesToWriteFromBuffer;
+
+                    long overallWritten = headerSize + totalWritten;
+                    int progressPercent = Math.Min(95, (int)(5 + (overallWritten * 90) / totalBytes));
+                    this.progressReporter.ReportProgressWithInterval(overallWritten, totalBytes, $"{WorkTitle} 진행중...", 1.0);
                 }
                 catch (IOException)
                 {
@@ -185,6 +226,9 @@ namespace PickPack.Disk
                 {
                     Optimal.ArrayPool.Return(buffer);
                 }
+
+                if (totalWritten >= remainingBytes)
+                    break;
             }
             physicalDriveStream.Flush();
         }
